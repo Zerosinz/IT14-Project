@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Staff Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;700&family=Nunito+Sans:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top"><span class="brand">Staff dashboard</span><nav><a href="/">Customer site</a></nav></header>
+
+  <main>
+    <form id="loginForm" class="card row">
+      <input id="pw" type="password" placeholder="Staff password" required>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+    <p id="loginMsg" role="status"></p>
+
+    <div id="panel" hidden>
+      <section>
+        <h2>Orders</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Ref</th><th>Customer</th><th>Order</th><th>Total</th><th>Status</th></tr></thead>
+          <tbody id="orders"></tbody>
+        </table></div>
+      </section>
+
+      <section>
+        <h2>Customer chats</h2>
+        <div class="admin-chat">
+          <ul id="chatList" class="chat-list"></ul>
+          <div class="card">
+            <div id="adminLog" class="chat-log"><p class="muted">Select a chat to read and reply.</p></div>
+            <form id="replyForm" class="row" hidden>
+              <input id="replyText" placeholder="Type a reply" maxlength="500" required>
+              <button class="btn" type="submit">Reply</button>
+            </form>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="/admin.js"></script>
+</body>
+</html>

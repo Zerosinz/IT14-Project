@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Customer Concerns</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="bg-light">
+    <div class="container py-4" style="max-width: 480px">
+      <!-- Insert your logo here -->
+      <h1 class="h5">Roderos Purified Water Refilling Station</h1>
+      <p class="text-muted">
+        Send us your concern, such as gallon cleanliness or delivery. Our staff
+        will reply here.
+      </p>
+      <div class="card">
+        <div class="card-body">
+          <div
+            id="log"
+            class="border rounded p-2 mb-3"
+            style="height: 280px; overflow: auto"
+            aria-live="polite"
+          ></div>
+          <form id="f">
+            <input
+              id="name"
+              class="form-control mb-2"
+              placeholder="Your name"
+              maxlength="60"
+              required
+            />
+            <div class="input-group">
+              <input
+                id="text"
+                class="form-control"
+                placeholder="Type your concern"
+                maxlength="500"
+                required
+              /><button class="btn btn-primary">Send</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <script>
+      const $ = (s) => document.querySelector(s);
+      let sid = localStorage.getItem("rw-sid");
+      if (!sid) {
+        sid =
+          "c-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem("rw-sid", sid);
+      }
+      $("#name").value = localStorage.getItem("rw-name") || "";
+      async function load() {
+        const msgs = await (await fetch("/api/chat/" + sid)).json();
+        const log = $("#log");
+        log.replaceChildren();
+        if (!msgs.length) log.textContent = "No messages yet.";
+        msgs.forEach((m) => {
+          const row = document.createElement("div"),
+            b = document.createElement("span");
+          row.className = "mb-1 " + (m.sender === "customer" ? "text-end" : "");
+          b.className =
+            "badge text-wrap " +
+            (m.sender === "customer"
+              ? "text-bg-primary"
+              : "text-bg-light border text-dark");
+          b.textContent = m.message;
+          row.append(b);
+          log.append(row);
+        });
+        log.scrollTop = log.scrollHeight;
+      }
+      $("#f").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        localStorage.setItem("rw-name", $("#name").value);
+        await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sid,
+            name: $("#name").value,
+            text: $("#text").value,
+          }),
+        });
+        $("#text").value = "";
+        load();
+      });
+      load();
+      setInterval(load, 4000);
+    </script>
+  </body>
+</html>

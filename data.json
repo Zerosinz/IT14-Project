@@ -1,0 +1,87 @@
+{
+ "seq": {
+  "employees": 1,
+  "users": 3,
+  "products": 2,
+  "customers": 2
+ },
+ "t": {
+  "users": [
+   {
+    "user_id": 1,
+    "account_status": "Active",
+    "full_name": "Sophie Roderos",
+    "username": "owner",
+    "password_hash": "$2a$10$Z/BC2JCokcnUKAzHYJCiYe9o3gO8NkXYFgM61XjZghZGM7b/aEBQS",
+    "role": "Owner/Admin"
+   },
+   {
+    "user_id": 2,
+    "account_status": "Active",
+    "full_name": "Station Staff",
+    "username": "staff",
+    "password_hash": "$2a$10$b4BGJ1TKF97HuGoafEBiV.fbCi/JVQvdjW.x0CLcI72jE4ckKrCLG",
+    "role": "Staff"
+   },
+   {
+    "user_id": 3,
+    "account_status": "Active",
+    "full_name": "Juan Dela Cruz",
+    "username": "rider",
+    "password_hash": "$2a$10$puOO.y3crDcFjhHf.a.61OZr2HUotLeJSrHdk8TDZNkLrCKebf6qm",
+    "role": "Delivery Personnel",
+    "employee_id": 1
+   }
+  ],
+  "employees": [
+   {
+    "employee_id": 1,
+    "employment_status": "Active",
+    "full_name": "Juan Dela Cruz",
+    "contact_number": "09123456789",
+    "job_title": "Delivery rider"
+   }
+  ],
+  "customers": [
+   {
+    "customer_id": 1,
+    "date_added": "2026-11-21 17:27:54",
+    "customer_name": "Maria Santos",
+    "contact_number": "09171234567",
+    "address": "Purok Ipil-Ipil, Visayan Village"
+   },
+   {
+    "customer_id": 2,
+    "date_added": "2026-11-21 17:27:54",
+    "customer_name": "Pedro Reyes",
+    "contact_number": "09281234567",
+    "address": "Visayan Village, Tagum"
+   }
+  ],
+  "products": [
+   {
+    "product_id": 1,
+    "status": "Active",
+    "product_name": "Purified Water Refill",
+    "size_or_type": "5-gallon",
+    "unit_price": 25
+   },
+   {
+    "product_id": 2,
+    "status": "Active",
+    "product_name": "Purified Water Refill",
+    "size_or_type": "3-gallon",
+    "unit_price": 15
+   }
+  ],
+  "orders": [],
+  "order_items": [],
+  "deliveries": [],
+  "sales": [],
+  "gallon_transactions": [],
+  "complaints": [],
+  "expenses": [],
+  "salary_records": [],
+  "chat_messages": []
+ }
+}
