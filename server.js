@@ -137,6 +137,7 @@ app.use(
   ["/", "index.html"],
   ["/app.js", "app.js"],
   ["/chat", "chat.html"],
+  ["/theme.css", "theme.css"],
 ].forEach(([r, f]) =>
   app.get(r, (q, s) => s.sendFile(path.join(__dirname, f))),
 );

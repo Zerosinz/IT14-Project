@@ -57,18 +57,46 @@ const M = [
 ];
 
 let user, timer;
+const GROUP = { customers: 'Daily work', orders: 'Daily work', deliveries: 'Daily work', gallon_transactions: 'Daily work', sales: 'Daily work', complaints: 'Support', chats: 'Support',
+  reports: 'Business', products: 'Business', employees: 'Business', salary_records: 'Business', expenses: 'Business', users: 'Business' };
+const put = (k, id, b) => ['PUT', `${k}/${id}`, b];
+// Quick actions per module: [label, request, show-when, toast]
+const QUICK = {
+  orders: [['Complete', r => put('orders', r.order_id, { order_status: 'Completed' }), r => !/Completed|Cancelled/.test(r.order_status), 'Order completed.'],
+    ['Create sale', r => ['POST', 'sales', { order_id: r.order_id, payment_status: 'Unpaid' }], null, 'Sale created from order.'],
+    ['Schedule delivery', r => ['POST', 'deliveries', { order_id: r.order_id }], r => +r.delivery_required, 'Delivery scheduled.']],
+  deliveries: [['Start trip', r => put('deliveries', r.delivery_id, { delivery_status: 'Out for delivery' }), r => r.delivery_status === 'Scheduled', 'Trip started.'],
+    ['Mark delivered', r => put('deliveries', r.delivery_id, { delivery_status: 'Delivered' }), r => r.delivery_status !== 'Delivered', 'Marked as delivered.']],
+  sales: [['Mark paid', r => put('sales', r.sale_id, { payment_status: 'Paid' }), r => r.payment_status !== 'Paid', 'Marked as paid.']],
+  complaints: [['Resolve', r => put('complaints', r.complaint_id, { status: 'Resolved' }), r => r.status !== 'Resolved', 'Concern resolved.']]
+};
+const label = c => { const s = c.replace(/_/g, ' '); return s[0].toUpperCase() + s.slice(1); };
+const pill = v => h('span', { class: 'pill ' + (/^(Completed|Paid|Delivered|Resolved|Active|Return)$/.test(v) ? 'ok' : /^(Cancelled|Inactive)$/.test(v) ? 'bad'
+  : /^(Pending|Unpaid|Open|Scheduled|Rescheduled|Borrow)$/.test(v) ? 'warn' : 'info') }, v);
+function toast(msg, bad) { const t = h('div', { class: 'toast-x' + (bad ? ' bad' : ''), role: 'status' }, msg); $('#toasts').append(t); setTimeout(() => t.remove(), 3500); }
+const ask = msg => new Promise(res => {
+  const d = h('dialog', { class: 'modal-x small' }, h('p', {}, msg), h('div', { class: 'd-flex gap-2 justify-content-end' },
+    h('button', { class: 'btn btn-outline-secondary', onclick: () => d.close('no') }, 'Keep it'), h('button', { class: 'btn btn-danger', onclick: () => d.close('yes') }, 'Delete')));
+  d.addEventListener('close', () => { res(d.returnValue === 'yes'); d.remove(); }); document.body.append(d); d.showModal();
+});
+const isoDay = d => new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
 
 function start(u) {
-  user = u; $('#login').hidden = true; $('#app').hidden = false; $('#who').textContent = `${u.name} (${u.role})`;
-  const mods = M.filter(m => m.r.includes(u.role));
-  $('#nav').replaceChildren(...mods.map(m => h('a', { href: '#', k: m.k, class: 'list-group-item list-group-item-action', onclick: e => { e.preventDefault(); show(m); } }, m.t)));
+  user = u; $('#login').hidden = true; $('#app').hidden = false;
+  $('#who').textContent = u.name; $('#role').textContent = u.role; $('#av').textContent = u.name[0];
+  const mods = M.filter(m => m.r.includes(u.role)), items = []; let g = '';
+  mods.forEach(m => {
+    const gg = GROUP[m.k] || ''; if (gg && gg !== g) items.push(h('div', { class: 'nav-group' }, gg)); g = gg;
+    items.push(h('a', { href: '#', k: m.k, class: 'nav-link-x', onclick: e => { e.preventDefault(); show(m); } }, m.t));
+  });
+  $('#nav').replaceChildren(...items);
   show(u.role === D ? M.find(m => m.k === 'deliveries') : mods[0]);
 }
 
 async function show(m) {
   clearInterval(timer);
-  const el = $('#main');
-  el.replaceChildren(h('h2', { class: 'h4 mb-3' }, m.t));
+  const el = $('#main'); document.title = m.t + ' · Roderos Water';
+  el.replaceChildren(h('div', { class: 'page-head' }, h('h2', {}, m.t)));
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.k === m.k));
   try { m.run ? await m.run(el) : await crud(m, el); }
   catch (e) { el.append(h('div', { class: 'alert alert-danger' }, e.message)); }
@@ -80,7 +108,9 @@ async function crud(m, el) {
   const fields = m.f.filter(f => !limited || ['delivery_status', 'remarks'].includes(f[0]));
   const refs = {};
   await Promise.all(fields.filter(f => f[2] === 'ref').map(async f => refs[f[0]] = await api('/api/t/' + f[3][0])));
-  const slot = h('div'), canEdit = m.w.includes(user.role);
+  const canEdit = m.w.includes(user.role), canAdd = (m.add || m.w).includes(user.role);
+  const st = { q: '', f: '', col: null, dir: 1 }, sc = m.c.find(c => /status/.test(c));
+  const slot = h('div');
 
   function openForm(row) {
     const inputs = {}, err = h('div', { class: 'text-danger small mb-2', role: 'alert' });
@@ -95,44 +125,87 @@ async function crud(m, el) {
       if (t === 'number') i.step = 'any';
       if (row && row[n] != null && t !== 'password') i.value = t === 'datetime' ? String(row[n]).replace(' ', 'T').slice(0, 16) : row[n];
       inputs[n] = i;
-      return h('div', { class: 'col-md-6' }, h('label', { class: 'form-label' }, l), i);
+      return h('div', { class: t === 'textarea' ? 'col-12' : 'col-md-6' }, h('label', { class: 'form-label' }, l), i);
     };
-    const form = h('form', { class: 'card card-body mb-3', onsubmit: async e => {
+    const d = h('dialog', { class: 'modal-x' }), form = h('form', { onsubmit: async e => {
       e.preventDefault();
       const body = Object.fromEntries(Object.entries(inputs).map(([n, i]) => [n, i.value]));
-      try { await api('/api/t/' + m.k + (row ? '/' + row[pk] : ''), { method: row ? 'PUT' : 'POST', body }); show(m); }
+      try { await api('/api/t/' + m.k + (row ? '/' + row[pk] : ''), { method: row ? 'PUT' : 'POST', body }); d.close(); toast(row ? 'Changes saved.' : 'Record added.'); show(m); }
       catch (x) { err.textContent = x.message; }
-    } }, h('div', { class: 'row g-3 mb-3' }, fields.map(field)), err,
-      h('div', {}, h('button', { class: 'btn btn-primary me-2' }, row ? 'Save changes' : 'Add record'), h('button', { type: 'button', class: 'btn btn-outline-secondary', onclick: () => slot.replaceChildren() }, 'Cancel')));
-    slot.replaceChildren(form); form.scrollIntoView({ block: 'nearest' });
+    } }, h('h3', { class: 'h5 mb-3' }, row ? 'Edit record' : 'New record'), h('div', { class: 'row g-3 mb-3' }, fields.map(field)), err,
+      h('div', { class: 'd-flex gap-2 justify-content-end' }, h('button', { type: 'button', class: 'btn btn-outline-secondary', onclick: () => d.close() }, 'Cancel'),
+        h('button', { class: 'btn btn-primary' }, row ? 'Save changes' : 'Add record')));
+    if (inputs.customer_id && inputs.delivery_address && !row) inputs.customer_id.addEventListener('change', () => { // fill the address from the customer record
+      const c = refs.customer_id.find(x => x.customer_id == inputs.customer_id.value); if (c && !inputs.delivery_address.value) inputs.delivery_address.value = c.address || ''; });
+    d.append(form); d.addEventListener('close', () => d.remove()); document.body.append(d); d.showModal();
   }
 
-  if ((m.add || m.w).includes(user.role)) el.append(h('button', { class: 'btn btn-primary mb-3', onclick: () => openForm() }, 'Add new'));
-  el.append(slot, table(m.c, rows, r => h('td', { class: 'text-nowrap' },
-    canEdit ? h('button', { class: 'btn btn-sm btn-outline-primary me-1', onclick: () => openForm(r) }, 'Edit') : '',
+  const visible = () => {
+    const q = st.q, v = rows.filter(r => (!st.f || r[sc] === st.f) && (!q || m.c.some(c => String(r[c] ?? '').toLowerCase().includes(q))));
+    if (st.col) v.sort((a, b) => st.dir * String(a[st.col] ?? '').localeCompare(String(b[st.col] ?? ''), undefined, { numeric: true }));
+    return v;
+  };
+  const doQuick = async (qa, r) => {
+    const [method, p, body] = qa[1](r);
+    try { await api('/api/t/' + p, { method, body }); toast(qa[3]); show(m); } catch (x) { toast(x.message, 1); }
+  };
+  const actions = r => h('td', {}, h('div', { class: 'act' },
+    ...(canEdit ? (QUICK[m.k] || []).filter(qa => !qa[2] || qa[2](r)).map(qa => h('button', { class: 'btn btn-sm btn-primary', onclick: () => doQuick(qa, r) }, qa[0])) : []),
+    canEdit ? h('button', { class: 'btn btn-sm btn-outline-primary', onclick: () => openForm(r) }, 'Edit') : '',
     user.role === A ? h('button', { class: 'btn btn-sm btn-outline-danger', onclick: async () => {
-      if (!confirm('Delete this record?')) return;
-      try { await api(`/api/t/${m.k}/${r[pk]}`, { method: 'DELETE' }); show(m); } catch (x) { alert(x.message); } } }, 'Delete') : '')));
+      if (!await ask('Delete this record? This cannot be undone.')) return;
+      try { await api(`/api/t/${m.k}/${r[pk]}`, { method: 'DELETE' }); toast('Record deleted.'); show(m); } catch (x) { toast(x.message, 1); } } }, 'Delete') : ''));
+  const draw = () => { const v = visible(); slot.replaceChildren(
+    table(m.c, v, canEdit || user.role === A ? actions : null, { sort: st.col, dir: st.dir, onSort: c => { st.dir = st.col === c ? -st.dir : 1; st.col = c; draw(); } }),
+    h('div', { class: 'count' }, `Showing ${v.length} of ${rows.length}`)); };
+  const exportCsv = () => {
+    const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const t = [m.c.map(label), ...visible().map(r => m.c.map(c => r[c]))].map(r => r.map(q).join(',')).join('\n');
+    h('a', { href: URL.createObjectURL(new Blob(['\ufeff' + t], { type: 'text/csv' })), download: m.k + '.csv' }).click();
+  };
+  el.append(h('div', { class: 'toolbar no-print' },
+    h('input', { class: 'form-control', type: 'search', placeholder: 'Search ' + m.t.toLowerCase(), 'aria-label': 'Search', oninput: e => { st.q = e.target.value.toLowerCase(); draw(); } }),
+    sc ? h('select', { class: 'form-select', 'aria-label': 'Filter by status', onchange: e => { st.f = e.target.value; draw(); } }, h('option', { value: '' }, 'All statuses'),
+      ...[...new Set(rows.map(r => r[sc]).filter(Boolean))].map(v => h('option', { value: v }, v))) : '',
+    h('span', { class: 'grow' }), h('button', { class: 'btn btn-outline-secondary', onclick: exportCsv }, 'Export CSV'),
+    canAdd ? h('button', { class: 'btn btn-primary', onclick: () => openForm() }, 'Add new') : ''), slot);
+  draw();
   if (m.after) await m.after(el);
 }
 
-function table(cols, rows, actions) {
-  return h('div', { class: 'table-responsive' }, h('table', { class: 'table table-sm table-striped bg-white align-middle' },
-    h('thead', {}, h('tr', {}, cols.map(c => h('th', {}, c.replace(/_/g, ' '))), actions ? h('th') : '')),
-    h('tbody', {}, rows.length ? rows.map(r => h('tr', {}, cols.map(c => h('td', {}, String(fmt(c, r[c]))), ), actions ? actions(r) : ''))
-      : h('tr', {}, h('td', { colSpan: cols.length + 1, class: 'text-muted' }, 'No records yet.')))));
+function table(cols, rows, actions, o = {}) {
+  const th = c => h('th', { class: o.onSort ? 'sortable' : '', ...(o.onSort ? { onclick: () => o.onSort(c) } : {}) }, label(c) + (o.sort === c ? (o.dir > 0 ? ' ↑' : ' ↓') : ''));
+  const cell = (r, c) => h('td', { class: MONEY.includes(c) ? 'num' : '' }, /status|transaction_type/.test(c) && r[c] ? pill(r[c]) : String(fmt(c, r[c])));
+  return h('div', { class: 'tbl-card' }, h('div', { class: 'table-responsive' }, h('table', { class: 'table tbl' },
+    h('thead', {}, h('tr', {}, cols.map(th), actions ? h('th') : '')),
+    h('tbody', {}, rows.length ? rows.map(r => h('tr', {}, cols.map(c => cell(r, c)), actions ? actions(r) : ''))
+      : h('tr', {}, h('td', { colSpan: cols.length + 1 }, h('div', { class: 'empty' }, 'Nothing here yet. Add a record or change your search.')))))));
 }
 
 async function balances(el) {
   const rows = await api('/api/gallon-balance');
-  el.append(h('h3', { class: 'h5 mt-4' }, 'Outstanding gallons per customer'), table(['customer_name', 'borrowed', 'returned', 'outstanding'], rows));
+  el.append(h('h3', { class: 'h5 mt-4 mb-3' }, 'Outstanding gallons per customer'), table(['customer_name', 'borrowed', 'returned', 'outstanding'], rows));
 }
 
 async function dash(el) {
-  const d = await api('/api/dashboard');
-  const card = (l, v) => h('div', { class: 'col-6 col-lg-4' }, h('div', { class: 'card card-body' }, h('div', { class: 'text-muted small' }, l), h('div', { class: 'fs-3 fw-semibold' }, v)));
-  el.append(h('div', { class: 'row g-3' }, card('Sales today', peso(d.sales_today)), card('Pending orders', d.pending_orders), card('Active deliveries', d.pending_deliveries),
-    card('Gallons not yet returned', d.gallons_out), card('Unresolved concerns', d.open_concerns), d.expenses_month !== undefined ? card('Expenses this month', peso(d.expenses_month)) : ''));
+  const [d, sales, orders, cs] = await Promise.all([api('/api/dashboard'), api('/api/t/sales'), api('/api/t/orders'), api('/api/t/complaints')]);
+  const days = [...Array(7)].map((_, i) => new Date(Date.now() - (6 - i) * 864e5));
+  const tot = days.map(x => sales.filter(s => (s.sale_date || '').startsWith(isoDay(x))).reduce((a, s) => a + Number(s.total_amount), 0)), max = Math.max(...tot, 1);
+  const stat = (l, v, c) => h('div', { class: 'stat ' + (c || '') }, h('span', {}, l), h('b', {}, v));
+  const go = k => () => show(M.find(m => m.k === k));
+  const list = (title, items, k, line) => h('div', { class: 'panel' }, h('h3', {}, title),
+    items.length ? items.slice(0, 5).map(i => h('div', { class: 'row-link' }, ...line(i))) : h('p', { class: 'muted mb-0' }, 'All clear.'),
+    h('button', { class: 'btn btn-sm btn-outline-primary mt-3', onclick: go(k) }, 'Open ' + M.find(m => m.k === k).t.toLowerCase()));
+  el.append(h('p', { class: 'muted' }, new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' })),
+    h('div', { class: 'stats' }, stat('Sales today', peso(d.sales_today), 'lead'), stat('Pending orders', d.pending_orders), stat('Active deliveries', d.pending_deliveries),
+      stat('Gallons not yet returned', d.gallons_out), stat('Unresolved concerns', d.open_concerns), d.expenses_month !== undefined ? stat('Expenses this month', peso(d.expenses_month)) : ''),
+    h('div', { class: 'dash-grid' },
+      h('div', { class: 'panel' }, h('h3', {}, `Sales, last 7 days: ${peso(tot.reduce((a, b) => a + b, 0))}`),
+        h('div', { class: 'chart', role: 'img', 'aria-label': 'Bar chart of daily sales for the last 7 days' }, days.map((x, i) => h('div', { class: 'bar' + (i === 6 ? ' today' : '') },
+          h('span', {}, tot[i] ? '₱' + Math.round(tot[i]) : ''), h('div', { class: 'bar-track' }, h('i', { style: `height:${tot[i] / max * 100}%` })), h('span', {}, x.toLocaleDateString('en-PH', { weekday: 'short' })))))),
+      h('div', { class: 'd-grid gap-3' },
+        list('Orders waiting', orders.filter(o => o.order_status === 'Pending'), 'orders', o => [`#${o.order_id} ${o.customer_name}`, peso(o.total)]),
+        list('Open concerns', cs.filter(c => c.status !== 'Resolved'), 'complaints', c => [c.customer_name, pill(c.status)]))));
 }
 
 async function reports(el) {
@@ -183,5 +256,6 @@ $('#loginForm').addEventListener('submit', async e => {
   try { start(await api('/api/login', { method: 'POST', body: { username: $('#user').value, password: $('#pass').value } })); }
   catch (x) { $('#loginErr').textContent = x.message; }
 });
+document.querySelectorAll('[data-u]').forEach(b => b.onclick = () => { $('#user').value = b.dataset.u; $('#pass').value = b.dataset.p; });
 $('#logout').addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }); location.reload(); });
 fetch('/api/me').then(r => r.ok && r.json()).then(u => u && start(u));
