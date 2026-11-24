@@ -812,3 +812,70 @@ dialog.modal-x.small {
   padding: 0.7rem 1rem;
   margin-bottom: 1rem;
 }
+
+/* ===== THEME BUTTONS: light/dark button + color button with palette list ===== */
+.theme-btns {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-left: auto;
+}
+.pal-wrap {
+  position: relative;
+}
+.pal {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  padding: 0.4rem;
+  min-width: 170px;
+  z-index: 50;
+}
+.pal[hidden] {
+  display: none;
+}
+.pal button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--text);
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  text-align: left;
+}
+.pal button:hover,
+.pal button[aria-pressed="true"] {
+  background: var(--pl);
+}
+.pal button[aria-pressed="true"] {
+  font-weight: 700;
+}
+.pal i {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.login {
+  position: relative;
+}
+.login-tools {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 5;
+}
+.login-tools .theme-btns {
+  margin: 0;
+}
+.login-tools .icon-btn {
+  background: var(--card);
+}

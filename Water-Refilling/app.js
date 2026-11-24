@@ -374,24 +374,58 @@ const ico = (k) =>
   });
 // color palettes and dark mode (saved in this browser)
 const root = document.documentElement;
+const SUN =
+    "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
+  MOON = "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z";
 const setTheme = (t) => {
   root.dataset.theme = t;
   localStorage.setItem("rw-theme", t);
   document
-    .querySelectorAll(".dots button")
+    .querySelectorAll(".pal button")
     .forEach((b) => b.setAttribute("aria-pressed", b.dataset.t === t));
 };
 const setMode = (m) => {
   root.dataset.mode = m;
   root.dataset.bsTheme = m;
   localStorage.setItem("rw-mode", m);
+  document
+    .querySelectorAll(".js-mode .ico")
+    .forEach(
+      (i) =>
+        (i.innerHTML = `<svg viewBox="0 0 24 24"><path d="${m === "dark" ? SUN : MOON}"/></svg>`),
+    );
 };
+const closePal = () =>
+  document.querySelectorAll(".pal").forEach((p) => {
+    p.hidden = true;
+    p.previousElementSibling.setAttribute("aria-expanded", "false");
+  });
+// BUTTON 1 (light/dark) and BUTTON 2 (color palette list). They appear on the login screen and in the top bar.
 document
-  .querySelectorAll(".dots button")
-  .forEach((b) => b.addEventListener("click", () => setTheme(b.dataset.t)));
-$("#mode").addEventListener("click", () =>
-  setMode(root.dataset.mode === "dark" ? "light" : "dark"),
+  .querySelectorAll(".js-mode")
+  .forEach((b) =>
+    b.addEventListener("click", () =>
+      setMode(root.dataset.mode === "dark" ? "light" : "dark"),
+    ),
+  );
+document.querySelectorAll(".js-color").forEach((b) =>
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const p = b.nextElementSibling,
+      open = p.hidden;
+    closePal();
+    p.hidden = !open;
+    b.setAttribute("aria-expanded", String(open));
+  }),
 );
+document.querySelectorAll(".pal button").forEach((b) =>
+  b.addEventListener("click", () => {
+    setTheme(b.dataset.t);
+    closePal();
+  }),
+);
+document.addEventListener("click", closePal);
+document.addEventListener("keydown", (e) => e.key === "Escape" && closePal());
 setTheme(localStorage.getItem("rw-theme") || "ocean");
 setMode(localStorage.getItem("rw-mode") || "light");
 const GROUP = {
