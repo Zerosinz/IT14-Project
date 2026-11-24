@@ -9,7 +9,9 @@ const h = (tag, attrs = {}, ...kids) => {
       ? (e.className = v)
       : k.startsWith("on")
         ? e.addEventListener(k.slice(2), v)
-        : (e[k] = v);
+        : k.includes("-")
+          ? e.setAttribute(k, v)
+          : (e[k] = v); // data-* and aria-* need setAttribute
   kids.flat().forEach((c) => e.append(c ?? ""));
   return e;
 };
@@ -1066,22 +1068,101 @@ async function balances(el) {
 }
 
 async function dash(el) {
-  const [d, sales, orders, cs, prods] = await Promise.all([
+  const [d, sales, orders, cs, prods, dels] = await Promise.all([
     api("/api/dashboard"),
     api("/api/t/sales"),
     api("/api/t/orders"),
     api("/api/t/complaints"),
     api("/api/t/products"),
+    api("/api/t/deliveries"),
   ]);
-  const days = [...Array(7)].map(
-    (_, i) => new Date(Date.now() - (6 - i) * 864e5),
-  );
-  const tot = days.map((x) =>
+  const today = isoDay(new Date()),
+    saleSum = (f) =>
       sales
-        .filter((s) => (s.sale_date || "").startsWith(isoDay(x)))
-        .reduce((a, s) => a + Number(s.total_amount), 0),
+        .filter((x) => f((x.sale_date || "").slice(0, 10)))
+        .reduce((a, x) => a + Number(x.total_amount), 0);
+  // SALES CHART: compact bar chart with a Daily (last 7 days) / Weekly (last 6 weeks) switch. Height: ".chart" in theme.css.
+  const bucket = (mode, i) => {
+    const n = mode === "daily" ? 7 : 6,
+      step = mode === "daily" ? 1 : 7,
+      end = Date.now() - (n - 1 - i) * step * 864e5;
+    const days = [...Array(step)].map((_, k) =>
+      isoDay(new Date(end - k * 864e5)),
+    );
+    return {
+      total: saleSum((x) => days.includes(x)),
+      name:
+        mode === "daily"
+          ? new Date(end).toLocaleDateString("en-PH", { weekday: "short" })
+          : new Date(end - 6 * 864e5).toLocaleDateString("en-PH", {
+              month: "short",
+              day: "numeric",
+            }),
+    };
+  };
+  const chartBox = h("div", { class: "chart-box" }),
+    sum = h("span", { class: "muted" }),
+    tabs = h("div", {
+      class: "seg",
+      role: "group",
+      "aria-label": "Chart range",
+    });
+  const drawChart = (mode) => {
+    const bars = [...Array(mode === "daily" ? 7 : 6)].map((_, i) =>
+        bucket(mode, i),
+      ),
+      max = Math.max(...bars.map((b) => b.total), 1);
+    sum.textContent =
+      peso(bars.reduce((a, b) => a + b.total, 0)) +
+      (mode === "daily" ? " in the last 7 days" : " in the last 6 weeks");
+    tabs
+      .querySelectorAll("button")
+      .forEach((b) => b.setAttribute("aria-pressed", b.dataset.m === mode));
+    chartBox.replaceChildren(
+      h(
+        "div",
+        {
+          class: "chart",
+          role: "img",
+          "aria-label": `Bar chart of ${mode} sales`,
+        },
+        bars.map((b, i) =>
+          h(
+            "div",
+            { class: "bar" + (i === bars.length - 1 ? " today" : "") },
+            h("span", {}, b.total ? "₱" + Math.round(b.total) : ""),
+            h(
+              "div",
+              { class: "bar-track" },
+              h("i", { style: `height:${(b.total / max) * 100}%` }),
+            ),
+            h("span", {}, b.name),
+          ),
+        ),
+      ),
+    );
+  };
+  [
+    ["daily", "Daily"],
+    ["weekly", "Weekly"],
+  ].forEach(([m, t]) =>
+    tabs.append(
+      h(
+        "button",
+        { type: "button", "data-m": m, onclick: () => drawChart(m) },
+        t,
+      ),
     ),
-    max = Math.max(...tot, 1);
+  );
+  const salesPanel = h(
+    "div",
+    { class: "panel sales-panel" },
+    h("div", { class: "panel-top" }, h("h3", {}, "Sales"), tabs),
+    sum,
+    chartBox,
+  );
+  drawChart("daily");
+
   const stat = (l, v, k, t) =>
     h(
       "div",
@@ -1089,117 +1170,109 @@ async function dash(el) {
       h("div", { class: "tile", style: "--t:" + t }, ico(k)),
       h("div", {}, h("span", {}, l), h("b", {}, v)),
     );
-  const go = (k) => () => show(M.find((m) => m.k === k));
+  // 8 cards = a balanced 4 x 2 grid for every role (Owner sees Expenses where Staff sees Orders today)
+  const cards = [
+    stat("Sales today", peso(d.sales_today), "sales", "#16a34a"),
+    stat(
+      "Sales this month",
+      peso(saleSum((x) => x.slice(0, 7) === today.slice(0, 7))),
+      "reports",
+      "#0d9488",
+    ),
+    stat("Pending orders", d.pending_orders, "orders", "#d97706"),
+    d.expenses_month !== undefined
+      ? stat(
+          "Expenses this month",
+          peso(d.expenses_month),
+          "expenses",
+          "#7c3aed",
+        )
+      : stat(
+          "Orders today",
+          orders.filter((o) => (o.order_date || "").startsWith(today)).length,
+          "orders",
+          "#6366f1",
+        ),
+    stat("Active deliveries", d.pending_deliveries, "deliveries", "#2563eb"),
+    stat(
+      "Gallons not yet returned",
+      d.gallons_out,
+      "gallon_transactions",
+      "#0891b2",
+    ),
+    stat("Unresolved concerns", d.open_concerns, "complaints", "#e11d48"),
+    stat("Low-stock items", d.low_stock, "products", "#ea580c"),
+  ];
   const list = (title, items, k, line) =>
     h(
       "div",
-      { class: "panel" },
+      { class: "panel list" },
       h("h3", {}, title),
-      items.length
-        ? items
-            .slice(0, 5)
-            .map((i) => h("div", { class: "row-link" }, ...line(i)))
-        : h("p", { class: "muted mb-0" }, "All clear."),
+      h(
+        "div",
+        { class: "list-body" },
+        items.length
+          ? items
+              .slice(0, 4)
+              .map((i) => h("div", { class: "row-link" }, ...line(i)))
+          : h("p", { class: "muted mb-0" }, "All clear."),
+      ),
       h(
         "button",
-        { class: "btn btn-sm btn-outline-primary mt-3", onclick: go(k) },
-        "Open " + M.find((m) => m.k === k).t.toLowerCase(),
+        {
+          class: "btn btn-sm btn-outline-primary align-self-start",
+          onclick: () => show(M.find((m) => m.k === k)),
+        },
+        "View all",
       ),
     );
   el.append(
     h(
       "p",
       { class: "muted" },
-      new Date().toLocaleDateString("en-PH", {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-      }),
+      `Welcome back, ${user.name.split(" ")[0]}. ` +
+        new Date().toLocaleDateString("en-PH", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+        }),
     ),
-    h(
-      "div",
-      { class: "stats" },
-      stat("Sales today", peso(d.sales_today), "sales", "#16a34a"),
-      stat("Pending orders", d.pending_orders, "orders", "#d97706"),
-      stat("Active deliveries", d.pending_deliveries, "deliveries", "#2563eb"),
-      stat(
-        "Gallons not yet returned",
-        d.gallons_out,
-        "gallon_transactions",
-        "#0891b2",
-      ),
-      stat("Unresolved concerns", d.open_concerns, "complaints", "#e11d48"),
-      stat("Low-stock items", d.low_stock, "products", "#ea580c"),
-      d.expenses_month !== undefined
-        ? stat(
-            "Expenses this month",
-            peso(d.expenses_month),
-            "expenses",
-            "#7c3aed",
-          )
-        : "",
-    ),
+    h("div", { class: "stats" }, cards),
     h(
       "div",
       { class: "dash-grid" },
-      h(
-        "div",
-        { class: "panel" },
-        h(
-          "h3",
-          {},
-          `Sales, last 7 days: ${peso(tot.reduce((a, b) => a + b, 0))}`,
-        ),
-        h(
-          "div",
-          {
-            class: "chart",
-            role: "img",
-            "aria-label": "Bar chart of daily sales for the last 7 days",
-          },
-          days.map((x, i) =>
-            h(
-              "div",
-              { class: "bar" + (i === 6 ? " today" : "") },
-              h("span", {}, tot[i] ? "₱" + Math.round(tot[i]) : ""),
-              h(
-                "div",
-                { class: "bar-track" },
-                h("i", { style: `height:${(tot[i] / max) * 100}%` }),
-              ),
-              h(
-                "span",
-                {},
-                x.toLocaleDateString("en-PH", { weekday: "short" }),
-              ),
-            ),
-          ),
-        ),
+      salesPanel,
+      list(
+        "Orders waiting",
+        orders.filter((o) => o.order_status === "Pending"),
+        "orders",
+        (o) => [`#${o.order_id} ${o.customer_name}`, peso(o.total)],
       ),
-      h(
-        "div",
-        { class: "d-grid gap-3" },
-        list(
-          "Orders waiting",
-          orders.filter((o) => o.order_status === "Pending"),
-          "orders",
-          (o) => [`#${o.order_id} ${o.customer_name}`, peso(o.total)],
+      list(
+        "Open concerns",
+        cs.filter((c) => c.status !== "Resolved"),
+        "complaints",
+        (c) => [c.customer_name, pill(c.status)],
+      ),
+      list(
+        "Low stock",
+        prods.filter((p) => /^(Low|Out)/.test(p.stock_status)),
+        "products",
+        (p) => [
+          `${p.product_name} (${p.size_or_type || ""})`,
+          pill(p.stock_status),
+        ],
+      ),
+      list(
+        "Deliveries in progress",
+        dels.filter((x) =>
+          ["Scheduled", "Out for delivery"].includes(x.delivery_status),
         ),
-        list(
-          "Open concerns",
-          cs.filter((c) => c.status !== "Resolved"),
-          "complaints",
-          (c) => [c.customer_name, pill(c.status)],
-        ),
-        list(
-          "Low stock",
-          prods.filter((p) => /^(Low|Out)/.test(p.stock_status)),
-          "products",
-          (p) => [
-            `${p.product_name} (${p.size_or_type || ""})`,
-            pill(p.stock_status),
-          ],
-        ),
+        "deliveries",
+        (x) => [
+          `#${x.order_id} ${x.customer_name || ""}`,
+          pill(x.delivery_status),
+        ],
       ),
     ),
   );
