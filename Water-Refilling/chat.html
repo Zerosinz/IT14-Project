@@ -10,6 +10,8 @@
 </head>
 <body>
   <div class="cust">
+    <!-- ===== LOGO SPOT 3: customer chat page. Nothing to edit; it loads the logo uploaded by the Owner (Business settings). ===== -->
+    <img class="logo-big" src="/logo" alt="Business logo" hidden onload="this.hidden=false" onerror="this.remove()" style="background:none;padding:0;margin-bottom:.8rem">
     <h1>Roderos Purified Water Refilling Station</h1>
     <p class="muted mb-0">Message us about gallon cleanliness, delivery or billing. Our staff will reply here.</p>
     <div id="log" class="clog" aria-live="polite"></div>
@@ -24,6 +26,8 @@
     </form>
   </div>
   <script>
+    const R = document.documentElement, T = localStorage.getItem("rw-theme"), M = localStorage.getItem("rw-mode");
+    if (T) R.dataset.theme = T; if (M) { R.dataset.mode = M; R.dataset.bsTheme = M; }
     const $ = s => document.querySelector(s);
     let sid = localStorage.getItem("rw-sid");
     if (!sid) { sid = "c-" + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem("rw-sid", sid); }

@@ -9,7 +9,9 @@ const h = (tag, attrs = {}, ...kids) => {
       ? (e.className = v)
       : k.startsWith("on")
         ? e.addEventListener(k.slice(2), v)
-        : (e[k] = v);
+        : k.includes("-")
+          ? e.setAttribute(k, v)
+          : (e[k] = v); // data-* and aria-* need setAttribute
   kids.flat().forEach((c) => e.append(c ?? ""));
   return e;
 };
@@ -99,7 +101,8 @@ const M = [
         [
           "products",
           "product_id",
-          (r) => `${r.product_name} (${r.size_or_type}) ${peso(r.unit_price)}`,
+          (r) =>
+            `${r.product_name} (${r.size_or_type}) ${peso(r.unit_price)}${r.stock_qty != null ? ", " + r.stock_qty + " in stock" : ""}`,
         ],
         1,
       ],
@@ -238,14 +241,25 @@ const M = [
   { k: "reports", t: "Reports", r: [A, S], run: reports },
   {
     k: "products",
-    t: "Products and prices",
-    r: [A],
+    t: "Inventory and prices",
+    r: [A, S],
     w: [A],
-    c: ["product_id", "product_name", "size_or_type", "unit_price", "status"],
+    c: [
+      "product_id",
+      "product_name",
+      "size_or_type",
+      "unit_price",
+      "stock_qty",
+      "reorder_level",
+      "stock_status",
+      "status",
+    ],
     f: [
       ["product_name", "Product name", "text"],
       ["size_or_type", "Size / type", "text"],
       ["unit_price", "Unit price", "number"],
+      ["stock_qty", "Stock on hand (leave blank if not tracked)", "number"],
+      ["reorder_level", "Warn me when stock is at or below", "number"],
       ["status", "Status", "select", ["Active", "Inactive"]],
     ],
   },
@@ -306,6 +320,8 @@ const M = [
       ["amount", "Amount", "number"],
     ],
   },
+  // LOGO: owner uploads the business logo on this page (see settings() below)
+  { k: "settings", t: "Business settings", r: [A], run: settings },
   {
     k: "users",
     t: "User management",
@@ -349,6 +365,8 @@ const ICON = {
   salary_records: "M1 4h22v16H1zM1 10h22",
   expenses: "M23 18l-9.500-9.500-5 5L1 6M17 18h6v-6",
   users: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  settings:
+    "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M12 6v6l4 2",
 };
 const ico = (k) =>
@@ -358,24 +376,58 @@ const ico = (k) =>
   });
 // color palettes and dark mode (saved in this browser)
 const root = document.documentElement;
+const SUN =
+    "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
+  MOON = "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z";
 const setTheme = (t) => {
   root.dataset.theme = t;
   localStorage.setItem("rw-theme", t);
   document
-    .querySelectorAll(".dots button")
+    .querySelectorAll(".pal button")
     .forEach((b) => b.setAttribute("aria-pressed", b.dataset.t === t));
 };
 const setMode = (m) => {
   root.dataset.mode = m;
   root.dataset.bsTheme = m;
   localStorage.setItem("rw-mode", m);
+  document
+    .querySelectorAll(".js-mode .ico")
+    .forEach(
+      (i) =>
+        (i.innerHTML = `<svg viewBox="0 0 24 24"><path d="${m === "dark" ? SUN : MOON}"/></svg>`),
+    );
 };
+const closePal = () =>
+  document.querySelectorAll(".pal").forEach((p) => {
+    p.hidden = true;
+    p.previousElementSibling.setAttribute("aria-expanded", "false");
+  });
+// BUTTON 1 (light/dark) and BUTTON 2 (color palette list). They appear on the login screen and in the top bar.
 document
-  .querySelectorAll(".dots button")
-  .forEach((b) => b.addEventListener("click", () => setTheme(b.dataset.t)));
-$("#mode").addEventListener("click", () =>
-  setMode(root.dataset.mode === "dark" ? "light" : "dark"),
+  .querySelectorAll(".js-mode")
+  .forEach((b) =>
+    b.addEventListener("click", () =>
+      setMode(root.dataset.mode === "dark" ? "light" : "dark"),
+    ),
+  );
+document.querySelectorAll(".js-color").forEach((b) =>
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const p = b.nextElementSibling,
+      open = p.hidden;
+    closePal();
+    p.hidden = !open;
+    b.setAttribute("aria-expanded", String(open));
+  }),
 );
+document.querySelectorAll(".pal button").forEach((b) =>
+  b.addEventListener("click", () => {
+    setTheme(b.dataset.t);
+    closePal();
+  }),
+);
+document.addEventListener("click", closePal);
+document.addEventListener("keydown", (e) => e.key === "Escape" && closePal());
 setTheme(localStorage.getItem("rw-theme") || "ocean");
 setMode(localStorage.getItem("rw-mode") || "light");
 const GROUP = {
@@ -387,6 +439,7 @@ const GROUP = {
   complaints: "Support",
   chats: "Support",
   reports: "Business",
+  settings: "Business",
   products: "Business",
   employees: "Business",
   salary_records: "Business",
@@ -402,6 +455,13 @@ const QUICK = {
       (r) => put("orders", r.order_id, { order_status: "Completed" }),
       (r) => !/Completed|Cancelled/.test(r.order_status),
       "Order completed.",
+    ],
+    [
+      "Cancel order",
+      (r) => put("orders", r.order_id, { order_status: "Cancelled" }),
+      (r) => !/Completed|Cancelled/.test(r.order_status),
+      "Order cancelled. Stock returned.",
+      "btn-outline-danger",
     ],
     [
       "Create sale",
@@ -464,11 +524,13 @@ const pill = (v) =>
     {
       class:
         "pill " +
-        (/^(Completed|Paid|Delivered|Resolved|Active|Return)$/.test(v)
+        (/^(Completed|Paid|Delivered|Resolved|Active|Return|In stock)$/.test(v)
           ? "ok"
-          : /^(Cancelled|Inactive)$/.test(v)
+          : /^(Cancelled|Inactive|Out of stock)$/.test(v)
             ? "bad"
-            : /^(Pending|Unpaid|Open|Scheduled|Rescheduled|Borrow)$/.test(v)
+            : /^(Pending|Unpaid|Open|Scheduled|Rescheduled|Borrow|Low stock)$/.test(
+                  v,
+                )
               ? "warn"
               : "info"),
     },
@@ -724,6 +786,13 @@ async function crud(m, el) {
       h(
         "div",
         { class: "act" },
+        m.k === "products" && r.stock_qty != null
+          ? h(
+              "button",
+              { class: "btn btn-sm btn-primary", onclick: () => adjust(r) },
+              "Adjust stock",
+            )
+          : "",
         ...(canEdit
           ? (QUICK[m.k] || [])
               .filter((qa) => !qa[2] || qa[2](r))
@@ -731,7 +800,7 @@ async function crud(m, el) {
                 h(
                   "button",
                   {
-                    class: "btn btn-sm btn-primary",
+                    class: "btn btn-sm " + (qa[4] || "btn-primary"),
                     onclick: () => doQuick(qa, r),
                   },
                   qa[0],
@@ -772,18 +841,82 @@ async function crud(m, el) {
           : "",
       ),
     );
+  const adjust = (r) => {
+    // add (+) or remove (-) stock without opening the full edit form
+    const n = h("input", {
+        class: "form-control",
+        type: "number",
+        step: 1,
+        required: true,
+        "aria-label": "Change in stock",
+      }),
+      err = h("div", { class: "text-danger small mt-2", role: "alert" });
+    const d = h(
+      "dialog",
+      { class: "modal-x small" },
+      h(
+        "form",
+        {
+          onsubmit: async (e) => {
+            e.preventDefault();
+            try {
+              await api("/api/stock/" + r.product_id, {
+                method: "POST",
+                body: { change: n.value },
+              });
+              d.close();
+              toast("Stock updated.");
+              show(m);
+            } catch (x) {
+              err.textContent = x.message;
+            }
+          },
+        },
+        h("h3", { class: "h5" }, `${r.product_name} (${r.size_or_type || ""})`),
+        h(
+          "p",
+          { class: "muted" },
+          `On hand: ${r.stock_qty}. Enter a positive number to add stock, or a negative number to remove it.`,
+        ),
+        n,
+        err,
+        h(
+          "div",
+          { class: "d-flex gap-2 justify-content-end mt-3" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "btn btn-outline-secondary",
+              onclick: () => d.close(),
+            },
+            "Cancel",
+          ),
+          h("button", { class: "btn btn-primary" }, "Update stock"),
+        ),
+      ),
+    );
+    d.addEventListener("close", () => d.remove());
+    document.body.append(d);
+    d.showModal();
+  };
   const draw = () => {
     const v = visible();
     slot.replaceChildren(
-      table(m.c, v, canEdit || user.role === A ? actions : null, {
-        sort: st.col,
-        dir: st.dir,
-        onSort: (c) => {
-          st.dir = st.col === c ? -st.dir : 1;
-          st.col = c;
-          draw();
+      table(
+        m.c,
+        v,
+        canEdit || user.role === A || m.k === "products" ? actions : null,
+        {
+          sort: st.col,
+          dir: st.dir,
+          onSort: (c) => {
+            st.dir = st.col === c ? -st.dir : 1;
+            st.col = c;
+            draw();
+          },
         },
-      }),
+      ),
       h("div", { class: "count" }, `Showing ${v.length} of ${rows.length}`),
     );
   };
@@ -797,6 +930,25 @@ async function crud(m, el) {
       download: m.k + ".csv",
     }).click();
   };
+  const low =
+    m.k === "products"
+      ? rows.filter((r) => /^(Low|Out)/.test(r.stock_status))
+      : [];
+  if (low.length)
+    el.append(
+      h(
+        "div",
+        { class: "alert-low", role: "alert" },
+        h(
+          "b",
+          {},
+          `${low.length} ${low.length > 1 ? "items need" : "item needs"} restocking: `,
+        ),
+        low
+          .map((r) => `${r.product_name} (${r.size_or_type || ""})`)
+          .join(", ") + ".",
+      ),
+    );
   el.append(
     h(
       "div",
@@ -916,21 +1068,101 @@ async function balances(el) {
 }
 
 async function dash(el) {
-  const [d, sales, orders, cs] = await Promise.all([
+  const [d, sales, orders, cs, prods, dels] = await Promise.all([
     api("/api/dashboard"),
     api("/api/t/sales"),
     api("/api/t/orders"),
     api("/api/t/complaints"),
+    api("/api/t/products"),
+    api("/api/t/deliveries"),
   ]);
-  const days = [...Array(7)].map(
-    (_, i) => new Date(Date.now() - (6 - i) * 864e5),
-  );
-  const tot = days.map((x) =>
+  const today = isoDay(new Date()),
+    saleSum = (f) =>
       sales
-        .filter((s) => (s.sale_date || "").startsWith(isoDay(x)))
-        .reduce((a, s) => a + Number(s.total_amount), 0),
+        .filter((x) => f((x.sale_date || "").slice(0, 10)))
+        .reduce((a, x) => a + Number(x.total_amount), 0);
+  // SALES CHART: compact bar chart with a Daily (last 7 days) / Weekly (last 6 weeks) switch. Height: ".chart" in theme.css.
+  const bucket = (mode, i) => {
+    const n = mode === "daily" ? 7 : 6,
+      step = mode === "daily" ? 1 : 7,
+      end = Date.now() - (n - 1 - i) * step * 864e5;
+    const days = [...Array(step)].map((_, k) =>
+      isoDay(new Date(end - k * 864e5)),
+    );
+    return {
+      total: saleSum((x) => days.includes(x)),
+      name:
+        mode === "daily"
+          ? new Date(end).toLocaleDateString("en-PH", { weekday: "short" })
+          : new Date(end - 6 * 864e5).toLocaleDateString("en-PH", {
+              month: "short",
+              day: "numeric",
+            }),
+    };
+  };
+  const chartBox = h("div", { class: "chart-box" }),
+    sum = h("span", { class: "muted" }),
+    tabs = h("div", {
+      class: "seg",
+      role: "group",
+      "aria-label": "Chart range",
+    });
+  const drawChart = (mode) => {
+    const bars = [...Array(mode === "daily" ? 7 : 6)].map((_, i) =>
+        bucket(mode, i),
+      ),
+      max = Math.max(...bars.map((b) => b.total), 1);
+    sum.textContent =
+      peso(bars.reduce((a, b) => a + b.total, 0)) +
+      (mode === "daily" ? " in the last 7 days" : " in the last 6 weeks");
+    tabs
+      .querySelectorAll("button")
+      .forEach((b) => b.setAttribute("aria-pressed", b.dataset.m === mode));
+    chartBox.replaceChildren(
+      h(
+        "div",
+        {
+          class: "chart",
+          role: "img",
+          "aria-label": `Bar chart of ${mode} sales`,
+        },
+        bars.map((b, i) =>
+          h(
+            "div",
+            { class: "bar" + (i === bars.length - 1 ? " today" : "") },
+            h("span", {}, b.total ? "₱" + Math.round(b.total) : ""),
+            h(
+              "div",
+              { class: "bar-track" },
+              h("i", { style: `height:${(b.total / max) * 100}%` }),
+            ),
+            h("span", {}, b.name),
+          ),
+        ),
+      ),
+    );
+  };
+  [
+    ["daily", "Daily"],
+    ["weekly", "Weekly"],
+  ].forEach(([m, t]) =>
+    tabs.append(
+      h(
+        "button",
+        { type: "button", "data-m": m, onclick: () => drawChart(m) },
+        t,
+      ),
     ),
-    max = Math.max(...tot, 1);
+  );
+  const salesPanel = h(
+    "div",
+    { class: "panel sales-panel" },
+    h("div", { class: "panel-top" }, h("h3", {}, "Sales"), tabs),
+    sum,
+    chartBox,
+  );
+  drawChart("daily");
+
   const stat = (l, v, k, t) =>
     h(
       "div",
@@ -938,106 +1170,204 @@ async function dash(el) {
       h("div", { class: "tile", style: "--t:" + t }, ico(k)),
       h("div", {}, h("span", {}, l), h("b", {}, v)),
     );
-  const go = (k) => () => show(M.find((m) => m.k === k));
+  // 8 cards = a balanced 4 x 2 grid for every role (Owner sees Expenses where Staff sees Orders today)
+  const cards = [
+    stat("Sales today", peso(d.sales_today), "sales", "#16a34a"),
+    stat(
+      "Sales this month",
+      peso(saleSum((x) => x.slice(0, 7) === today.slice(0, 7))),
+      "reports",
+      "#0d9488",
+    ),
+    stat("Pending orders", d.pending_orders, "orders", "#d97706"),
+    d.expenses_month !== undefined
+      ? stat(
+          "Expenses this month",
+          peso(d.expenses_month),
+          "expenses",
+          "#7c3aed",
+        )
+      : stat(
+          "Orders today",
+          orders.filter((o) => (o.order_date || "").startsWith(today)).length,
+          "orders",
+          "#6366f1",
+        ),
+    stat("Active deliveries", d.pending_deliveries, "deliveries", "#2563eb"),
+    stat(
+      "Gallons not yet returned",
+      d.gallons_out,
+      "gallon_transactions",
+      "#0891b2",
+    ),
+    stat("Unresolved concerns", d.open_concerns, "complaints", "#e11d48"),
+    stat("Low-stock items", d.low_stock, "products", "#ea580c"),
+  ];
   const list = (title, items, k, line) =>
     h(
       "div",
-      { class: "panel" },
+      { class: "panel list" },
       h("h3", {}, title),
-      items.length
-        ? items
-            .slice(0, 5)
-            .map((i) => h("div", { class: "row-link" }, ...line(i)))
-        : h("p", { class: "muted mb-0" }, "All clear."),
+      h(
+        "div",
+        { class: "list-body" },
+        items.length
+          ? items
+              .slice(0, 4)
+              .map((i) => h("div", { class: "row-link" }, ...line(i)))
+          : h("p", { class: "muted mb-0" }, "All clear."),
+      ),
       h(
         "button",
-        { class: "btn btn-sm btn-outline-primary mt-3", onclick: go(k) },
-        "Open " + M.find((m) => m.k === k).t.toLowerCase(),
+        {
+          class: "btn btn-sm btn-outline-primary align-self-start",
+          onclick: () => show(M.find((m) => m.k === k)),
+        },
+        "View all",
       ),
     );
   el.append(
     h(
       "p",
       { class: "muted" },
-      new Date().toLocaleDateString("en-PH", {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-      }),
+      `Welcome back, ${user.name.split(" ")[0]}. ` +
+        new Date().toLocaleDateString("en-PH", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+        }),
     ),
-    h(
-      "div",
-      { class: "stats" },
-      stat("Sales today", peso(d.sales_today), "sales", "#16a34a"),
-      stat("Pending orders", d.pending_orders, "orders", "#d97706"),
-      stat("Active deliveries", d.pending_deliveries, "deliveries", "#2563eb"),
-      stat(
-        "Gallons not yet returned",
-        d.gallons_out,
-        "gallon_transactions",
-        "#0891b2",
-      ),
-      stat("Unresolved concerns", d.open_concerns, "complaints", "#e11d48"),
-      d.expenses_month !== undefined
-        ? stat(
-            "Expenses this month",
-            peso(d.expenses_month),
-            "expenses",
-            "#7c3aed",
-          )
-        : "",
-    ),
+    h("div", { class: "stats" }, cards),
     h(
       "div",
       { class: "dash-grid" },
+      salesPanel,
+      list(
+        "Orders waiting",
+        orders.filter((o) => o.order_status === "Pending"),
+        "orders",
+        (o) => [`#${o.order_id} ${o.customer_name}`, peso(o.total)],
+      ),
+      list(
+        "Open concerns",
+        cs.filter((c) => c.status !== "Resolved"),
+        "complaints",
+        (c) => [c.customer_name, pill(c.status)],
+      ),
+      list(
+        "Low stock",
+        prods.filter((p) => /^(Low|Out)/.test(p.stock_status)),
+        "products",
+        (p) => [
+          `${p.product_name} (${p.size_or_type || ""})`,
+          pill(p.stock_status),
+        ],
+      ),
+      list(
+        "Deliveries in progress",
+        dels.filter((x) =>
+          ["Scheduled", "Out for delivery"].includes(x.delivery_status),
+        ),
+        "deliveries",
+        (x) => [
+          `#${x.order_id} ${x.customer_name || ""}`,
+          pill(x.delivery_status),
+        ],
+      ),
+    ),
+  );
+}
+
+// ===== LOGO UPLOAD (Owner > Business settings) =====
+// The owner picks an image, it is shrunk to max 256px in the browser, then saved on the server (POST /api/logo).
+// The logo then shows automatically at: login screen, sidebar, customer chat page (all load <img src="/logo">).
+// To use it next time: sign in as owner, open Business settings, choose the logo file, press Upload logo.
+async function settings(el) {
+  const pick = (f) =>
+    new Promise((ok, no) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const i = new Image();
+        i.onload = () => {
+          const k = Math.min(1, 256 / Math.max(i.width, i.height)),
+            c = document.createElement("canvas");
+          c.width = Math.round(i.width * k);
+          c.height = Math.round(i.height * k);
+          c.getContext("2d").drawImage(i, 0, 0, c.width, c.height);
+          ok(c.toDataURL("image/png"));
+        };
+        i.onerror = () => no(new Error("That file is not a valid image."));
+        i.src = r.result;
+      };
+      r.readAsDataURL(f);
+    });
+  const file = h("input", {
+    type: "file",
+    accept: "image/png,image/jpeg,image/webp",
+    class: "form-control",
+    "aria-label": "Logo file",
+  });
+  const prev = h("img", {
+    class: "logo-prev",
+    src: "/logo?v=" + Date.now(),
+    alt: "Current logo",
+    onerror: (e) =>
+      e.target.replaceWith(
+        h("div", { class: "logo-prev none" }, "No logo yet"),
+      ),
+  });
+  const upload = async () => {
+    if (!file.files[0]) return toast("Choose an image first.", 1);
+    try {
+      await api("/api/logo", {
+        method: "POST",
+        body: { url: await pick(file.files[0]) },
+      });
+      toast("Logo saved.");
+      setTimeout(() => location.reload(), 600);
+    } catch (x) {
+      toast(x.message, 1);
+    }
+  };
+  const remove = async () => {
+    if (!(await ask("Remove the logo and go back to the default icon?")))
+      return;
+    await api("/api/logo", { method: "DELETE" });
+    toast("Logo removed.");
+    setTimeout(() => location.reload(), 600);
+  };
+  el.append(
+    h(
+      "div",
+      { class: "panel logo-panel" },
+      h("h3", {}, "Business logo"),
       h(
         "div",
-        { class: "panel" },
-        h(
-          "h3",
-          {},
-          `Sales, last 7 days: ${peso(tot.reduce((a, b) => a + b, 0))}`,
-        ),
+        { class: "logo-row" },
+        prev,
         h(
           "div",
-          {
-            class: "chart",
-            role: "img",
-            "aria-label": "Bar chart of daily sales for the last 7 days",
-          },
-          days.map((x, i) =>
+          {},
+          h(
+            "p",
+            { class: "muted" },
+            "Best results: a square or wide PNG with a transparent background, at least 256 px. It appears on the login screen, the sidebar and the customer chat page.",
+          ),
+          file,
+          h(
+            "div",
+            { class: "d-flex gap-2 mt-3" },
             h(
-              "div",
-              { class: "bar" + (i === 6 ? " today" : "") },
-              h("span", {}, tot[i] ? "₱" + Math.round(tot[i]) : ""),
-              h(
-                "div",
-                { class: "bar-track" },
-                h("i", { style: `height:${(tot[i] / max) * 100}%` }),
-              ),
-              h(
-                "span",
-                {},
-                x.toLocaleDateString("en-PH", { weekday: "short" }),
-              ),
+              "button",
+              { class: "btn btn-primary", onclick: upload },
+              "Upload logo",
+            ),
+            h(
+              "button",
+              { class: "btn btn-outline-secondary", onclick: remove },
+              "Remove logo",
             ),
           ),
-        ),
-      ),
-      h(
-        "div",
-        { class: "d-grid gap-3" },
-        list(
-          "Orders waiting",
-          orders.filter((o) => o.order_status === "Pending"),
-          "orders",
-          (o) => [`#${o.order_id} ${o.customer_name}`, peso(o.total)],
-        ),
-        list(
-          "Open concerns",
-          cs.filter((c) => c.status !== "Resolved"),
-          "complaints",
-          (c) => [c.customer_name, pill(c.status)],
         ),
       ),
     ),

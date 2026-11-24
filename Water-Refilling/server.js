@@ -124,7 +124,7 @@ if (!all("users").length) {
 
 // ---------- App setup ----------
 const app = express();
-app.use(express.json({ limit: "50kb" }));
+app.use(express.json({ limit: "300kb" })); // 300kb so the resized logo upload fits
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "change-this-secret",
@@ -222,7 +222,7 @@ const T = {
     req: ["customer_name"],
   },
   products: {
-    cols: ["product_name", "size_or_type", "unit_price", "status"],
+    cols: ["product_name", "size_or_type", "unit_price", "stock_qty", "reorder_level", "status"],
     r: [A, S],
     w: [A],
     req: ["product_name", "unit_price"],
@@ -323,6 +323,7 @@ const NUM = new Set([
   "gross_salary",
   "deductions",
 ]);
+["stock_qty", "reorder_level"].forEach((c) => NUM.add(c));
 const UNIQ = {
   users: ["username"],
   deliveries: ["order_id"],
@@ -421,6 +422,16 @@ const LIST = {
   users: () => all("users").map(({ password_hash, ...u }) => u),
 };
 
+// Inventory: every product gets a computed stock_status (blank stock_qty = not tracked, e.g. refill services)
+const stockState = (p) => p.stock_qty == null ? "Not tracked" : p.stock_qty <= 0 ? "Out of stock" : p.stock_qty <= (p.reorder_level || 0) ? "Low stock" : "In stock";
+const _listProducts = LIST.products;
+LIST.products = () => _listProducts().map((p) => ({ ...p, stock_status: stockState(p) }));
+
+// Orders and stock: placing an order takes tracked items out of stock; cancelling or deleting it puts them back
+const orderItems = (id) => all("order_items").filter((i) => i.order_id === id);
+const moveStock = (id, sign) => orderItems(id).forEach((i) => { const p = find("products", i.product_id); if (p && p.stock_qty != null) p.stock_qty += sign * i.quantity; });
+const stockOk = (id) => orderItems(id).every((i) => { const p = find("products", i.product_id); return !p || p.stock_qty == null || p.stock_qty >= i.quantity; });
+
 const guard = (m) => (q, s, n) => {
   const t = T[q.params.k];
   if (!t) return s.status(404).json({ error: "Unknown module." });
@@ -505,6 +516,8 @@ app.post(
       n = parseInt(b.quantity, 10);
       if (!prod || !(n > 0))
         throw new Error("Choose a product and a quantity.");
+      if (prod.stock_qty != null && prod.stock_qty < n)
+        throw new Error(`Only ${prod.stock_qty} in stock for ${prod.product_name} (${prod.size_or_type}).`);
     }
     const r = ins(k, f);
     if (k === "orders")
@@ -515,6 +528,7 @@ app.post(
         unit_price: prod.unit_price,
         line_total: prod.unit_price * n,
       });
+    if (k === "orders" && prod.stock_qty != null) { prod.stock_qty -= n; save(); }
     s.status(201).json({ id: r[PK[k]] });
   }),
 );
@@ -537,6 +551,14 @@ app.put(
     }
     const f = prep(k, pick(q.body, cols), q.body, false);
     check(k, f, rec[PK[k]], false);
+    if (k === "orders" && f.order_status && f.order_status !== rec.order_status) {
+      const was = rec.order_status === "Cancelled", will = f.order_status === "Cancelled";
+      if (!was && will) moveStock(rec.order_id, 1); // cancelled: items go back to stock
+      if (was && !will) {
+        if (!stockOk(rec.order_id)) throw new Error("Not enough stock to reopen this order.");
+        moveStock(rec.order_id, -1);
+      }
+    }
     Object.assign(rec, f);
     save();
     s.json({ ok: true });
@@ -558,6 +580,7 @@ app.delete(
       throw new Error(
         "This record is linked to other records and cannot be deleted.",
       );
+    if (k === "orders" && rec.order_status !== "Cancelled") moveStock(rec.order_id, 1);
     if (k === "orders")
       DB.t.order_items = all("order_items").filter(
         (i) => i.order_id !== rec.order_id,
@@ -597,6 +620,7 @@ app.get("/api/dashboard", need(A, S), (q, s) => {
       ),
       "amount",
     ); // admin-only
+  d.low_stock = all("products").filter((p) => p.status === "Active" && ["Low stock", "Out of stock"].includes(stockState(p))).length;
   s.json(d);
 });
 
@@ -746,7 +770,33 @@ app.post(
   }),
 );
 
+// ---------- Inventory: add (+) or remove (-) stock ----------
+app.post("/api/stock/:id", need(A, S), wrap((q, s) => {
+  const p = find("products", q.params.id), n = Number(q.body.change);
+  if (!p || p.stock_qty == null) throw new Error("This item does not track stock.");
+  if (!Number.isInteger(n) || !n) throw new Error("Enter a whole number, like 10 or -3.");
+  if (p.stock_qty + n < 0) throw new Error("Stock cannot go below zero.");
+  p.stock_qty += n; save(); s.json({ ok: true, stock_qty: p.stock_qty });
+}));
+
+// ---------- Business logo ----------
+// LOGO STORAGE: the owner uploads the logo in the app (Business settings). It is saved in logo.json
+// next to this file and served at /logo. Delete logo.json to go back to the default droplet icon.
+const LOGO = path.join(__dirname, "logo.json");
+const logoUrl = () => { try { return JSON.parse(fs.readFileSync(LOGO, "utf8")).url; } catch (e) { return null; } };
+app.get("/logo", (q, s) => {
+  const m = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(logoUrl() || "");
+  if (!m) return s.status(404).end();
+  s.set({ "Content-Type": m[1], "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" }).send(Buffer.from(m[2], "base64"));
+});
+app.post("/api/logo", need(A), wrap((q, s) => {
+  const url = String(q.body.url || "");
+  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(url)) throw new Error("Upload a PNG, JPG or WebP image.");
+  fs.writeFileSync(LOGO, JSON.stringify({ url })); s.json({ ok: true });
+}));
+app.delete("/api/logo", need(A), (q, s) => { try { fs.unlinkSync(LOGO); } catch (e) {} s.json({ ok: true }); });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
   console.log("Roderos system running on http://localhost:" + PORT),
-);
+);  
