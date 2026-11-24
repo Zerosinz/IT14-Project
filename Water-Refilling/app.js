@@ -99,7 +99,8 @@ const M = [
         [
           "products",
           "product_id",
-          (r) => `${r.product_name} (${r.size_or_type}) ${peso(r.unit_price)}`,
+          (r) =>
+            `${r.product_name} (${r.size_or_type}) ${peso(r.unit_price)}${r.stock_qty != null ? ", " + r.stock_qty + " in stock" : ""}`,
         ],
         1,
       ],
@@ -418,6 +419,13 @@ const QUICK = {
       (r) => put("orders", r.order_id, { order_status: "Completed" }),
       (r) => !/Completed|Cancelled/.test(r.order_status),
       "Order completed.",
+    ],
+    [
+      "Cancel order",
+      (r) => put("orders", r.order_id, { order_status: "Cancelled" }),
+      (r) => !/Completed|Cancelled/.test(r.order_status),
+      "Order cancelled. Stock returned.",
+      "btn-outline-danger",
     ],
     [
       "Create sale",
@@ -756,7 +764,7 @@ async function crud(m, el) {
                 h(
                   "button",
                   {
-                    class: "btn btn-sm btn-primary",
+                    class: "btn btn-sm " + (qa[4] || "btn-primary"),
                     onclick: () => doQuick(qa, r),
                   },
                   qa[0],

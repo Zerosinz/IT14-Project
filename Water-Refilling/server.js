@@ -427,6 +427,11 @@ const stockState = (p) => p.stock_qty == null ? "Not tracked" : p.stock_qty <= 0
 const _listProducts = LIST.products;
 LIST.products = () => _listProducts().map((p) => ({ ...p, stock_status: stockState(p) }));
 
+// Orders and stock: placing an order takes tracked items out of stock; cancelling or deleting it puts them back
+const orderItems = (id) => all("order_items").filter((i) => i.order_id === id);
+const moveStock = (id, sign) => orderItems(id).forEach((i) => { const p = find("products", i.product_id); if (p && p.stock_qty != null) p.stock_qty += sign * i.quantity; });
+const stockOk = (id) => orderItems(id).every((i) => { const p = find("products", i.product_id); return !p || p.stock_qty == null || p.stock_qty >= i.quantity; });
+
 const guard = (m) => (q, s, n) => {
   const t = T[q.params.k];
   if (!t) return s.status(404).json({ error: "Unknown module." });
@@ -511,6 +516,8 @@ app.post(
       n = parseInt(b.quantity, 10);
       if (!prod || !(n > 0))
         throw new Error("Choose a product and a quantity.");
+      if (prod.stock_qty != null && prod.stock_qty < n)
+        throw new Error(`Only ${prod.stock_qty} in stock for ${prod.product_name} (${prod.size_or_type}).`);
     }
     const r = ins(k, f);
     if (k === "orders")
@@ -521,6 +528,7 @@ app.post(
         unit_price: prod.unit_price,
         line_total: prod.unit_price * n,
       });
+    if (k === "orders" && prod.stock_qty != null) { prod.stock_qty -= n; save(); }
     s.status(201).json({ id: r[PK[k]] });
   }),
 );
@@ -543,6 +551,14 @@ app.put(
     }
     const f = prep(k, pick(q.body, cols), q.body, false);
     check(k, f, rec[PK[k]], false);
+    if (k === "orders" && f.order_status && f.order_status !== rec.order_status) {
+      const was = rec.order_status === "Cancelled", will = f.order_status === "Cancelled";
+      if (!was && will) moveStock(rec.order_id, 1); // cancelled: items go back to stock
+      if (was && !will) {
+        if (!stockOk(rec.order_id)) throw new Error("Not enough stock to reopen this order.");
+        moveStock(rec.order_id, -1);
+      }
+    }
     Object.assign(rec, f);
     save();
     s.json({ ok: true });
@@ -564,6 +580,7 @@ app.delete(
       throw new Error(
         "This record is linked to other records and cannot be deleted.",
       );
+    if (k === "orders" && rec.order_status !== "Cancelled") moveStock(rec.order_id, 1);
     if (k === "orders")
       DB.t.order_items = all("order_items").filter(
         (i) => i.order_id !== rec.order_id,
@@ -782,4 +799,4 @@ app.delete("/api/logo", need(A), (q, s) => { try { fs.unlinkSync(LOGO); } catch 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
   console.log("Roderos system running on http://localhost:" + PORT),
-);
+);  
