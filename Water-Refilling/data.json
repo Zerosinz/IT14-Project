@@ -2,10 +2,9 @@
  "seq": {
   "employees": 1,
   "users": 3,
-  "products": 2,
+  "products": 5,
   "customers": 2,
-  "expenses": 1,
-  "sales": 1
+  "complaints": 1
  },
  "t": {
   "users": [
@@ -74,34 +73,53 @@
     "product_name": "Purified Water Refill",
     "size_or_type": "3-gallon",
     "unit_price": 15
+   },
+   {
+    "product_id": 3,
+    "status": "Active",
+    "product_name": "Gallon container (new)",
+    "size_or_type": "5-gallon",
+    "unit_price": 180,
+    "stock_qty": 12,
+    "reorder_level": 5
+   },
+   {
+    "product_id": 4,
+    "status": "Active",
+    "product_name": "Gallon cap and seal",
+    "size_or_type": "pack of 10",
+    "unit_price": 50,
+    "stock_qty": 3,
+    "reorder_level": 5
+   },
+   {
+    "product_id": 5,
+    "status": "Active",
+    "product_name": "Filter cartridge",
+    "size_or_type": "sediment",
+    "unit_price": 450,
+    "stock_qty": 0,
+    "reorder_level": 2
    }
   ],
   "orders": [],
   "order_items": [],
   "deliveries": [],
-  "sales": [
-   {
-    "sale_id": 1,
-    "sale_date": "2026-11-22 17:50:10",
-    "payment_status": "Unpaid",
-    "total_amount": 2000,
-    "payment_method": "Cash",
-    "recorded_by": 2,
-    "order_id": null
-   }
-  ],
+  "sales": [],
   "gallon_transactions": [],
-  "complaints": [],
-  "expenses": [
+  "complaints": [
    {
-    "expense_id": 1,
-    "expense_date": "2026-12-20",
-    "category": "Electricity",
-    "description": "Pricey",
-    "amount": 1500,
-    "recorded_by": 1
+    "complaint_id": 1,
+    "received_at": "2026-11-21 23:34:00",
+    "status": "Open",
+    "customer_id": 1,
+    "category": "Delivery concern",
+    "description": "Lacking of Gallons",
+    "resolution": "Yes Ma'am",
+    "handled_by": 2
    }
   ],
+  "expenses": [],
   "salary_records": [],
   "chat_messages": []
  }

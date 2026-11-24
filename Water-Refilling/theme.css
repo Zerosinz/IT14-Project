@@ -748,3 +748,67 @@ dialog.modal-x.small {
     box-shadow: none;
   }
 }
+
+/* ===== LOGO SIZES (edit here if the owner's logo looks too big or small) ===== */
+.brand-x i {
+  position: relative;
+  overflow: hidden;
+  width: 42px;
+  height: 42px;
+} /* sidebar logo tile */
+.logo-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+.logo-big {
+  display: block;
+  height: 72px;
+  width: auto;
+  max-width: 220px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 14px;
+  padding: 8px;
+} /* login + chat logo */
+.logo-big[hidden] {
+  display: none;
+}
+.logo-big:not([hidden]) ~ .jug {
+  display: none;
+}
+.logo-panel {
+  max-width: 720px;
+}
+.logo-row {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.logo-prev {
+  width: 140px;
+  height: 140px;
+  object-fit: contain;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
+}
+.logo-prev.none {
+  display: grid;
+  place-items: center;
+  color: var(--mute);
+  font-size: 0.85rem;
+  text-align: center;
+}
+.alert-low {
+  background: color-mix(in srgb, #d97706 14%, var(--card));
+  border: 1px solid color-mix(in srgb, #d97706 40%, var(--line));
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  margin-bottom: 1rem;
+}

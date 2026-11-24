@@ -238,14 +238,25 @@ const M = [
   { k: "reports", t: "Reports", r: [A, S], run: reports },
   {
     k: "products",
-    t: "Products and prices",
-    r: [A],
+    t: "Inventory and prices",
+    r: [A, S],
     w: [A],
-    c: ["product_id", "product_name", "size_or_type", "unit_price", "status"],
+    c: [
+      "product_id",
+      "product_name",
+      "size_or_type",
+      "unit_price",
+      "stock_qty",
+      "reorder_level",
+      "stock_status",
+      "status",
+    ],
     f: [
       ["product_name", "Product name", "text"],
       ["size_or_type", "Size / type", "text"],
       ["unit_price", "Unit price", "number"],
+      ["stock_qty", "Stock on hand (leave blank if not tracked)", "number"],
+      ["reorder_level", "Warn me when stock is at or below", "number"],
       ["status", "Status", "select", ["Active", "Inactive"]],
     ],
   },
@@ -306,6 +317,8 @@ const M = [
       ["amount", "Amount", "number"],
     ],
   },
+  // LOGO: owner uploads the business logo on this page (see settings() below)
+  { k: "settings", t: "Business settings", r: [A], run: settings },
   {
     k: "users",
     t: "User management",
@@ -349,6 +362,8 @@ const ICON = {
   salary_records: "M1 4h22v16H1zM1 10h22",
   expenses: "M23 18l-9.500-9.500-5 5L1 6M17 18h6v-6",
   users: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  settings:
+    "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M12 6v6l4 2",
 };
 const ico = (k) =>
@@ -387,6 +402,7 @@ const GROUP = {
   complaints: "Support",
   chats: "Support",
   reports: "Business",
+  settings: "Business",
   products: "Business",
   employees: "Business",
   salary_records: "Business",
@@ -464,11 +480,13 @@ const pill = (v) =>
     {
       class:
         "pill " +
-        (/^(Completed|Paid|Delivered|Resolved|Active|Return)$/.test(v)
+        (/^(Completed|Paid|Delivered|Resolved|Active|Return|In stock)$/.test(v)
           ? "ok"
-          : /^(Cancelled|Inactive)$/.test(v)
+          : /^(Cancelled|Inactive|Out of stock)$/.test(v)
             ? "bad"
-            : /^(Pending|Unpaid|Open|Scheduled|Rescheduled|Borrow)$/.test(v)
+            : /^(Pending|Unpaid|Open|Scheduled|Rescheduled|Borrow|Low stock)$/.test(
+                  v,
+                )
               ? "warn"
               : "info"),
     },
@@ -724,6 +742,13 @@ async function crud(m, el) {
       h(
         "div",
         { class: "act" },
+        m.k === "products" && r.stock_qty != null
+          ? h(
+              "button",
+              { class: "btn btn-sm btn-primary", onclick: () => adjust(r) },
+              "Adjust stock",
+            )
+          : "",
         ...(canEdit
           ? (QUICK[m.k] || [])
               .filter((qa) => !qa[2] || qa[2](r))
@@ -772,18 +797,82 @@ async function crud(m, el) {
           : "",
       ),
     );
+  const adjust = (r) => {
+    // add (+) or remove (-) stock without opening the full edit form
+    const n = h("input", {
+        class: "form-control",
+        type: "number",
+        step: 1,
+        required: true,
+        "aria-label": "Change in stock",
+      }),
+      err = h("div", { class: "text-danger small mt-2", role: "alert" });
+    const d = h(
+      "dialog",
+      { class: "modal-x small" },
+      h(
+        "form",
+        {
+          onsubmit: async (e) => {
+            e.preventDefault();
+            try {
+              await api("/api/stock/" + r.product_id, {
+                method: "POST",
+                body: { change: n.value },
+              });
+              d.close();
+              toast("Stock updated.");
+              show(m);
+            } catch (x) {
+              err.textContent = x.message;
+            }
+          },
+        },
+        h("h3", { class: "h5" }, `${r.product_name} (${r.size_or_type || ""})`),
+        h(
+          "p",
+          { class: "muted" },
+          `On hand: ${r.stock_qty}. Enter a positive number to add stock, or a negative number to remove it.`,
+        ),
+        n,
+        err,
+        h(
+          "div",
+          { class: "d-flex gap-2 justify-content-end mt-3" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "btn btn-outline-secondary",
+              onclick: () => d.close(),
+            },
+            "Cancel",
+          ),
+          h("button", { class: "btn btn-primary" }, "Update stock"),
+        ),
+      ),
+    );
+    d.addEventListener("close", () => d.remove());
+    document.body.append(d);
+    d.showModal();
+  };
   const draw = () => {
     const v = visible();
     slot.replaceChildren(
-      table(m.c, v, canEdit || user.role === A ? actions : null, {
-        sort: st.col,
-        dir: st.dir,
-        onSort: (c) => {
-          st.dir = st.col === c ? -st.dir : 1;
-          st.col = c;
-          draw();
+      table(
+        m.c,
+        v,
+        canEdit || user.role === A || m.k === "products" ? actions : null,
+        {
+          sort: st.col,
+          dir: st.dir,
+          onSort: (c) => {
+            st.dir = st.col === c ? -st.dir : 1;
+            st.col = c;
+            draw();
+          },
         },
-      }),
+      ),
       h("div", { class: "count" }, `Showing ${v.length} of ${rows.length}`),
     );
   };
@@ -797,6 +886,25 @@ async function crud(m, el) {
       download: m.k + ".csv",
     }).click();
   };
+  const low =
+    m.k === "products"
+      ? rows.filter((r) => /^(Low|Out)/.test(r.stock_status))
+      : [];
+  if (low.length)
+    el.append(
+      h(
+        "div",
+        { class: "alert-low", role: "alert" },
+        h(
+          "b",
+          {},
+          `${low.length} ${low.length > 1 ? "items need" : "item needs"} restocking: `,
+        ),
+        low
+          .map((r) => `${r.product_name} (${r.size_or_type || ""})`)
+          .join(", ") + ".",
+      ),
+    );
   el.append(
     h(
       "div",
@@ -916,11 +1024,12 @@ async function balances(el) {
 }
 
 async function dash(el) {
-  const [d, sales, orders, cs] = await Promise.all([
+  const [d, sales, orders, cs, prods] = await Promise.all([
     api("/api/dashboard"),
     api("/api/t/sales"),
     api("/api/t/orders"),
     api("/api/t/complaints"),
+    api("/api/t/products"),
   ]);
   const days = [...Array(7)].map(
     (_, i) => new Date(Date.now() - (6 - i) * 864e5),
@@ -978,6 +1087,7 @@ async function dash(el) {
         "#0891b2",
       ),
       stat("Unresolved concerns", d.open_concerns, "complaints", "#e11d48"),
+      stat("Low-stock items", d.low_stock, "products", "#ea580c"),
       d.expenses_month !== undefined
         ? stat(
             "Expenses this month",
@@ -1038,6 +1148,111 @@ async function dash(el) {
           cs.filter((c) => c.status !== "Resolved"),
           "complaints",
           (c) => [c.customer_name, pill(c.status)],
+        ),
+        list(
+          "Low stock",
+          prods.filter((p) => /^(Low|Out)/.test(p.stock_status)),
+          "products",
+          (p) => [
+            `${p.product_name} (${p.size_or_type || ""})`,
+            pill(p.stock_status),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+// ===== LOGO UPLOAD (Owner > Business settings) =====
+// The owner picks an image, it is shrunk to max 256px in the browser, then saved on the server (POST /api/logo).
+// The logo then shows automatically at: login screen, sidebar, customer chat page (all load <img src="/logo">).
+// To use it next time: sign in as owner, open Business settings, choose the logo file, press Upload logo.
+async function settings(el) {
+  const pick = (f) =>
+    new Promise((ok, no) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const i = new Image();
+        i.onload = () => {
+          const k = Math.min(1, 256 / Math.max(i.width, i.height)),
+            c = document.createElement("canvas");
+          c.width = Math.round(i.width * k);
+          c.height = Math.round(i.height * k);
+          c.getContext("2d").drawImage(i, 0, 0, c.width, c.height);
+          ok(c.toDataURL("image/png"));
+        };
+        i.onerror = () => no(new Error("That file is not a valid image."));
+        i.src = r.result;
+      };
+      r.readAsDataURL(f);
+    });
+  const file = h("input", {
+    type: "file",
+    accept: "image/png,image/jpeg,image/webp",
+    class: "form-control",
+    "aria-label": "Logo file",
+  });
+  const prev = h("img", {
+    class: "logo-prev",
+    src: "/logo?v=" + Date.now(),
+    alt: "Current logo",
+    onerror: (e) =>
+      e.target.replaceWith(
+        h("div", { class: "logo-prev none" }, "No logo yet"),
+      ),
+  });
+  const upload = async () => {
+    if (!file.files[0]) return toast("Choose an image first.", 1);
+    try {
+      await api("/api/logo", {
+        method: "POST",
+        body: { url: await pick(file.files[0]) },
+      });
+      toast("Logo saved.");
+      setTimeout(() => location.reload(), 600);
+    } catch (x) {
+      toast(x.message, 1);
+    }
+  };
+  const remove = async () => {
+    if (!(await ask("Remove the logo and go back to the default icon?")))
+      return;
+    await api("/api/logo", { method: "DELETE" });
+    toast("Logo removed.");
+    setTimeout(() => location.reload(), 600);
+  };
+  el.append(
+    h(
+      "div",
+      { class: "panel logo-panel" },
+      h("h3", {}, "Business logo"),
+      h(
+        "div",
+        { class: "logo-row" },
+        prev,
+        h(
+          "div",
+          {},
+          h(
+            "p",
+            { class: "muted" },
+            "Best results: a square or wide PNG with a transparent background, at least 256 px. It appears on the login screen, the sidebar and the customer chat page.",
+          ),
+          file,
+          h(
+            "div",
+            { class: "d-flex gap-2 mt-3" },
+            h(
+              "button",
+              { class: "btn btn-primary", onclick: upload },
+              "Upload logo",
+            ),
+            h(
+              "button",
+              { class: "btn btn-outline-secondary", onclick: remove },
+              "Remove logo",
+            ),
+          ),
         ),
       ),
     ),

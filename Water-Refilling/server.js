@@ -124,7 +124,7 @@ if (!all("users").length) {
 
 // ---------- App setup ----------
 const app = express();
-app.use(express.json({ limit: "50kb" }));
+app.use(express.json({ limit: "300kb" })); // 300kb so the resized logo upload fits
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "change-this-secret",
@@ -222,7 +222,7 @@ const T = {
     req: ["customer_name"],
   },
   products: {
-    cols: ["product_name", "size_or_type", "unit_price", "status"],
+    cols: ["product_name", "size_or_type", "unit_price", "stock_qty", "reorder_level", "status"],
     r: [A, S],
     w: [A],
     req: ["product_name", "unit_price"],
@@ -323,6 +323,7 @@ const NUM = new Set([
   "gross_salary",
   "deductions",
 ]);
+["stock_qty", "reorder_level"].forEach((c) => NUM.add(c));
 const UNIQ = {
   users: ["username"],
   deliveries: ["order_id"],
@@ -420,6 +421,11 @@ const LIST = {
       .reverse(),
   users: () => all("users").map(({ password_hash, ...u }) => u),
 };
+
+// Inventory: every product gets a computed stock_status (blank stock_qty = not tracked, e.g. refill services)
+const stockState = (p) => p.stock_qty == null ? "Not tracked" : p.stock_qty <= 0 ? "Out of stock" : p.stock_qty <= (p.reorder_level || 0) ? "Low stock" : "In stock";
+const _listProducts = LIST.products;
+LIST.products = () => _listProducts().map((p) => ({ ...p, stock_status: stockState(p) }));
 
 const guard = (m) => (q, s, n) => {
   const t = T[q.params.k];
@@ -597,6 +603,7 @@ app.get("/api/dashboard", need(A, S), (q, s) => {
       ),
       "amount",
     ); // admin-only
+  d.low_stock = all("products").filter((p) => p.status === "Active" && ["Low stock", "Out of stock"].includes(stockState(p))).length;
   s.json(d);
 });
 
@@ -745,6 +752,32 @@ app.post(
     s.json({ ok: true });
   }),
 );
+
+// ---------- Inventory: add (+) or remove (-) stock ----------
+app.post("/api/stock/:id", need(A, S), wrap((q, s) => {
+  const p = find("products", q.params.id), n = Number(q.body.change);
+  if (!p || p.stock_qty == null) throw new Error("This item does not track stock.");
+  if (!Number.isInteger(n) || !n) throw new Error("Enter a whole number, like 10 or -3.");
+  if (p.stock_qty + n < 0) throw new Error("Stock cannot go below zero.");
+  p.stock_qty += n; save(); s.json({ ok: true, stock_qty: p.stock_qty });
+}));
+
+// ---------- Business logo ----------
+// LOGO STORAGE: the owner uploads the logo in the app (Business settings). It is saved in logo.json
+// next to this file and served at /logo. Delete logo.json to go back to the default droplet icon.
+const LOGO = path.join(__dirname, "logo.json");
+const logoUrl = () => { try { return JSON.parse(fs.readFileSync(LOGO, "utf8")).url; } catch (e) { return null; } };
+app.get("/logo", (q, s) => {
+  const m = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(logoUrl() || "");
+  if (!m) return s.status(404).end();
+  s.set({ "Content-Type": m[1], "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" }).send(Buffer.from(m[2], "base64"));
+});
+app.post("/api/logo", need(A), wrap((q, s) => {
+  const url = String(q.body.url || "");
+  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(url)) throw new Error("Upload a PNG, JPG or WebP image.");
+  fs.writeFileSync(LOGO, JSON.stringify({ url })); s.json({ ok: true });
+}));
+app.delete("/api/logo", need(A), (q, s) => { try { fs.unlinkSync(LOGO); } catch (e) {} s.json({ ok: true }); });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
