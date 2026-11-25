@@ -320,6 +320,8 @@ const M = [
       ["amount", "Amount", "number"],
     ],
   },
+  // BEYOND CRUD 2: Business insights (profit and loss, trends, top sellers). Code: insights() below, endpoint: /api/insights
+  { k: "insights", t: "Business insights", r: [A], run: insights },
   // LOGO: owner uploads the business logo on this page (see settings() below)
   { k: "settings", t: "Business settings", r: [A], run: settings },
   {
@@ -365,6 +367,7 @@ const ICON = {
   salary_records: "M1 4h22v16H1zM1 10h22",
   expenses: "M23 18l-9.500-9.500-5 5L1 6M17 18h6v-6",
   users: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  insights: "M23 6l-9.5 9.5-5-5L1 18M17 6h6v6",
   settings:
     "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M12 6v6l4 2",
@@ -439,6 +442,7 @@ const GROUP = {
   complaints: "Support",
   chats: "Support",
   reports: "Business",
+  insights: "Business",
   settings: "Business",
   products: "Business",
   employees: "Business",
@@ -791,6 +795,17 @@ async function crud(m, el) {
               "button",
               { class: "btn btn-sm btn-primary", onclick: () => adjust(r) },
               "Adjust stock",
+            )
+          : "",
+        // BEYOND CRUD 1: Receipt button (orders and sales that belong to an order). Code: receipt() below, endpoint: /api/receipt/:id
+        ["orders", "sales"].includes(m.k) && r.order_id != null
+          ? h(
+              "button",
+              {
+                class: "btn btn-sm btn-outline-secondary",
+                onclick: () => receipt(r.order_id),
+              },
+              "Receipt",
             )
           : "",
         ...(canEdit
@@ -1278,6 +1293,335 @@ async function dash(el) {
   );
 }
 
+// ===== BEYOND CRUD 1: RECEIPT GENERATOR =====
+// Builds a printable receipt from several records (order + items + customer + sale) and prints it (Print > Save as PDF also works).
+async function receipt(id) {
+  let r;
+  try {
+    r = await api("/api/receipt/" + id);
+  } catch (x) {
+    return toast(x.message, 1);
+  }
+  const d = h("dialog", { class: "modal-x receipt-dlg" }),
+    money = (v) => peso(Number(v) || 0);
+  d.append(
+    h(
+      "div",
+      { class: "receipt" },
+      // LOGO SPOT 4 (receipt header): loads the uploaded logo, hides itself if none. BUSINESS NAME and ADDRESS: edit the lines below.
+      h("img", {
+        class: "rc-logo",
+        src: "/logo",
+        alt: "",
+        onerror: (e) => e.target.remove(),
+      }),
+      h("h3", {}, "Roderos Purified Water Refilling Station"),
+      h("p", { class: "muted text-center mb-2" }, "Official receipt"),
+      h(
+        "div",
+        { class: "rc-meta" },
+        h("span", {}, "Receipt #" + String(r.ref).padStart(5, "0")),
+        h("span", {}, (r.date || "").slice(0, 16)),
+      ),
+      h(
+        "div",
+        { class: "rc-cust" },
+        h("b", {}, r.customer || "Customer"),
+        r.phone ? " · " + r.phone : "",
+        r.address
+          ? h("div", { class: "muted" }, "Deliver to: " + r.address)
+          : "",
+      ),
+      h(
+        "table",
+        { class: "rc-table" },
+        h(
+          "thead",
+          {},
+          h(
+            "tr",
+            {},
+            h("th", {}, "Item"),
+            h("th", { class: "n" }, "Qty"),
+            h("th", { class: "n" }, "Price"),
+            h("th", { class: "n" }, "Amount"),
+          ),
+        ),
+        h(
+          "tbody",
+          {},
+          r.items.map((i) =>
+            h(
+              "tr",
+              {},
+              h("td", {}, `${i.product} (${i.size || ""})`),
+              h("td", { class: "n" }, i.quantity),
+              h("td", { class: "n" }, money(i.unit_price)),
+              h("td", { class: "n" }, money(i.line_total)),
+            ),
+          ),
+        ),
+      ),
+      h(
+        "div",
+        { class: "rc-total" },
+        h("span", {}, "Total"),
+        h("span", {}, money(r.total)),
+      ),
+      h(
+        "div",
+        { class: "rc-pay" },
+        "Payment: ",
+        pill(r.payment_status),
+        r.payment_method ? " · " + r.payment_method : "",
+      ),
+      h(
+        "p",
+        { class: "text-center muted mt-3 mb-0" },
+        "Thank you for choosing us!",
+      ),
+    ),
+    h(
+      "div",
+      { class: "d-flex gap-2 justify-content-end no-print mt-3" },
+      h(
+        "button",
+        { class: "btn btn-outline-secondary", onclick: () => d.close() },
+        "Close",
+      ),
+      h(
+        "button",
+        {
+          class: "btn btn-primary",
+          onclick: () => {
+            document.body.classList.add("print-receipt");
+            addEventListener(
+              "afterprint",
+              () => document.body.classList.remove("print-receipt"),
+              { once: true },
+            );
+            print();
+          },
+        },
+        "Print receipt",
+      ),
+    ),
+  );
+  d.addEventListener("close", () => d.remove());
+  document.body.append(d);
+  d.showModal();
+}
+
+// ===== BEYOND CRUD 2: BUSINESS INSIGHTS =====
+// Owner-only analysis page. The server computes profit and loss for a month (collected sales - expenses - salaries), a 6-month trend,
+// top products and customers, expense breakdown and unpaid balances; this page turns them into plain-language insights.
+async function insights(el) {
+  const now = new Date(),
+    cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
+    mname = (m) =>
+      new Date(+m.slice(0, 4), +m.slice(5) - 1, 1).toLocaleDateString("en-PH", {
+        month: "short",
+      });
+  const month = h("input", {
+      type: "month",
+      class: "form-control",
+      value: cur,
+      max: cur,
+      "aria-label": "Month",
+      onchange: () => run(),
+    }),
+    out = h("div");
+  const run = async () => {
+    try {
+      render(await api("/api/insights?month=" + (month.value || cur)));
+    } catch (x) {
+      out.replaceChildren(h("div", { class: "alert alert-danger" }, x.message));
+    }
+  };
+  const stat = (l, v, k, t) =>
+    h(
+      "div",
+      { class: "stat" },
+      h("div", { class: "tile", style: "--t:" + t }, ico(k)),
+      h("div", {}, h("span", {}, l), h("b", {}, v)),
+    );
+  function render(d) {
+    const costs = d.expenses + d.salaries,
+      pct = d.prev_net
+        ? Math.round(((d.net - d.prev_net) / Math.abs(d.prev_net)) * 100)
+        : null,
+      tips = [];
+    tips.push(
+      `Net profit is ${peso(d.net)}${pct === null ? "." : `, ${pct >= 0 ? "up" : "down"} ${Math.abs(pct)}% from last month.`}`,
+    );
+    if (d.net < 0)
+      tips.push("Costs are higher than the sales collected this month.");
+    if (d.expense_categories[0])
+      tips.push(
+        `Biggest expense: ${d.expense_categories[0].name} (${peso(d.expense_categories[0].amount)}, ${Math.round((d.expense_categories[0].amount / (d.expenses || 1)) * 100)}% of expenses).`,
+      );
+    if (d.top_products[0])
+      tips.push(
+        `Best seller: ${d.top_products[0].name}, ${d.top_products[0].quantity} sold.`,
+      );
+    tips.push(
+      d.unpaid.count
+        ? `${peso(d.unpaid.amount)} is still unpaid across ${d.unpaid.count} sale${d.unpaid.count > 1 ? "s" : ""}.`
+        : "All sales are fully paid.",
+    );
+    const mx = Math.max(
+        ...d.trend.map((t) => Math.max(t.revenue, t.expenses + t.salaries)),
+        1,
+      ),
+      cmx = Math.max(...d.expense_categories.map((c) => c.amount), 1);
+    out.replaceChildren(
+      h(
+        "div",
+        { class: "panel mb-3" },
+        h("h3", {}, "What stands out"),
+        h(
+          "ul",
+          { class: "tips" },
+          tips.map((t) => h("li", {}, t)),
+        ),
+      ),
+      h(
+        "div",
+        { class: "stats" },
+        stat("Sales collected", peso(d.revenue), "sales", "#16a34a"),
+        stat(
+          "Costs (expenses and salaries)",
+          peso(costs),
+          "expenses",
+          "#d97706",
+        ),
+        stat(
+          "Net profit",
+          peso(d.net),
+          "reports",
+          d.net >= 0 ? "#2563eb" : "#e11d48",
+        ),
+        stat("Unpaid balances", peso(d.unpaid.amount), "complaints", "#7c3aed"),
+      ),
+      h(
+        "div",
+        { class: "dash-grid" },
+        h(
+          "div",
+          { class: "panel sales-panel" },
+          h(
+            "div",
+            { class: "panel-top" },
+            h("h3", {}, "Last 6 months"),
+            h(
+              "span",
+              { class: "legend" },
+              h("i", { class: "rev" }),
+              "Sales ",
+              h("i", { class: "cost" }),
+              "Costs",
+            ),
+          ),
+          h(
+            "div",
+            {
+              class: "trend",
+              role: "img",
+              "aria-label": "Sales and costs for the last 6 months",
+            },
+            d.trend.map((t) =>
+              h(
+                "div",
+                { class: "tg" + (t.month === d.month ? " cur" : "") },
+                h(
+                  "div",
+                  { class: "tb" },
+                  h("i", {
+                    class: "rev",
+                    title: "Sales " + peso(t.revenue),
+                    style: `height:${(t.revenue / mx) * 100}%`,
+                  }),
+                  h("i", {
+                    class: "cost",
+                    title: "Costs " + peso(t.expenses + t.salaries),
+                    style: `height:${((t.expenses + t.salaries) / mx) * 100}%`,
+                  }),
+                ),
+                h("span", {}, mname(t.month)),
+              ),
+            ),
+          ),
+        ),
+        h(
+          "div",
+          { class: "panel" },
+          h("h3", {}, "Where the money went"),
+          d.expense_categories.length
+            ? d.expense_categories.map((c) =>
+                h(
+                  "div",
+                  { class: "catbar" },
+                  h(
+                    "div",
+                    { class: "d-flex justify-content-between" },
+                    h("span", {}, c.name),
+                    h("span", {}, peso(c.amount)),
+                  ),
+                  h(
+                    "div",
+                    { class: "cb-track" },
+                    h("i", { style: `width:${(c.amount / cmx) * 100}%` }),
+                  ),
+                ),
+              )
+            : h(
+                "p",
+                { class: "muted mb-0" },
+                "No expenses recorded this month.",
+              ),
+        ),
+      ),
+      h(
+        "div",
+        { class: "two-col" },
+        h(
+          "div",
+          {},
+          h("h3", { class: "h6 mt-3" }, "Top products"),
+          table(
+            ["name", "quantity", "revenue"],
+            d.top_products.map((p) => ({ ...p, revenue: peso(p.revenue) })),
+          ),
+        ),
+        h(
+          "div",
+          {},
+          h("h3", { class: "h6 mt-3" }, "Top customers"),
+          table(
+            ["name", "orders", "spent"],
+            d.top_customers.map((c) => ({ ...c, spent: peso(c.spent) })),
+          ),
+        ),
+      ),
+    );
+  }
+  el.append(
+    h(
+      "div",
+      { class: "toolbar no-print" },
+      h("div", { style: "width:200px" }, month),
+      h("span", { class: "grow" }),
+      h(
+        "button",
+        { class: "btn btn-outline-secondary", onclick: () => print() },
+        "Print report",
+      ),
+    ),
+    out,
+  );
+  run();
+}
+
 // ===== LOGO UPLOAD (Owner > Business settings) =====
 // The owner picks an image, it is shrunk to max 256px in the browser, then saved on the server (POST /api/logo).
 // The logo then shows automatically at: login screen, sidebar, customer chat page (all load <img src="/logo">).
@@ -1579,3 +1923,4 @@ $("#logout").addEventListener("click", async () => {
 fetch("/api/me")
   .then((r) => r.ok && r.json())
   .then((u) => u && start(u));
+  
